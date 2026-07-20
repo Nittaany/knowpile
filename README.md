@@ -1,10 +1,10 @@
-# knowpile
+# knowpiler
 
-**knowpile** is a personal knowledge compiler for engineers.
+**knowpiler** is a personal knowledge compiler for engineers.
 
 Its goal is simple: take scattered project evidence, convert it into semantically faithful Markdown knowledge files, and use that canonical context with LLMs (Gemini, Claude, GPT, etc.) to generate better career artifacts (resume, LinkedIn, GitHub profile refinement, interview prep, and job-facing content).
 
-## Why knowpile exists
+## Why knowpiler exists
 
 Engineering evidence is usually fragmented across:
 
@@ -16,7 +16,7 @@ Engineering evidence is usually fragmented across:
 
 When this context is fed to LLMs in an ad-hoc way, outputs become generic, inconsistent, or drift away from real implementation details.
 
-knowpile is built to preserve semantic meaning first, so downstream outputs stay grounded.
+knowpiler is built to preserve semantic meaning first, so downstream outputs stay grounded.
 
 ## What this repo currently is (Checkpoint 0)
 
@@ -59,7 +59,7 @@ kepkb-inventory
 kepkb-normalize <staging_dir>
 ```
 
-> Note: command names still use legacy prefixes in this checkpoint script. Branding and product identity are now **knowpile**.
+> Note: command names still use legacy prefixes in this checkpoint script. Branding and product identity are now **knowpiler**.
 
 ## Status
 
