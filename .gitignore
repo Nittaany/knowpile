@@ -8,4 +8,6 @@ __pycache__/
 *.pyc
 *.egg-info/
 .env
+.venv/
+.venv*/
 memory_guide.md

@@ -18,6 +18,9 @@ dependencies = [
     "litellm>=1.40",
     "tomli-w>=1.0",
     "tomli>=2.0; python_version < '3.11'",
+    "graphifyy>=0.9.20",
+    "pygount>=3.2.0",
+    "python-dotenv>=1.2.2",
 ]
 
 [project.optional-dependencies]
