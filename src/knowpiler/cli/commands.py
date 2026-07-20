@@ -53,13 +53,52 @@ def config_set_backend(backend: str = typer.Argument(..., help=f"one of {cfg.SUP
     if backend not in cfg.SUPPORTED_BACKENDS:
         console.print(f"[red]Unknown backend '{backend}'.[/red] Choose from: {cfg.SUPPORTED_BACKENDS}")
         raise typer.Exit(code=1)
-    if not cfg.backend_ready(backend):
+    
+    # Billing Transparency Warning for Cloud Providers
+    if backend != "ollama":
+        console.print(
+            f"\n[cyan]◆ BILLING NOTICE[/cyan] [dim]Setting your backend to '{backend}' means you will be billed by the provider for API usage.\n"
+            "                 This includes semantic extraction, knowledge file rewriting, and final artifact generation.\n"
+            "                 Please ensure you have a valid API key and understand the costs.\n"
+        )
+        
+    # Local Model Hint for OpenAI compatible endpoints
+    if backend == "openai":
+        console.print(
+            "[cyan]◇ LOCAL MODEL[/cyan] [dim]If using a local OpenAI-compatible server (LM Studio, vLLM, etc.),\n"
+            "                 just paste your base URL (e.g., http://localhost:8080/v1) below.\n"
+            "                 We will auto-configure the rest.[/dim]\n"
+        )
+    
+    # The interceptor: if they don't have the key set, securely ask for it now
+    if not cfg.backend_ready(backend) and backend != "ollama":
         env_var = cfg.ENV_VAR_BY_BACKEND[backend]
-        console.print(f"[yellow]Warning:[/yellow] {env_var} isn't set yet -- set it before running `rewrite`.")
+        
+        # Dynamically change the prompt text based on backend
+        prompt_msg = f"Enter your {backend} API key (input is hidden):"
+        if backend == "openai":
+            prompt_msg = f"Enter your {backend} API key OR Local Base URL (input is hidden):"
+            
+        # Masked password prompt using InquirerPy
+        user_input = inquirer.secret(message=prompt_msg).execute()
+        
+        if user_input:
+            # SMART ROUTING: Did they paste a URL?
+            if backend == "openai" and user_input.startswith("http"):
+                cfg.save_credential("OPENAI_BASE_URL", user_input.strip())
+                cfg.save_credential("OPENAI_API_KEY", "sk-local-dummy-key")
+                console.print("[green]Local base URL saved securely! Dummy API key auto-generated.[/green]\n")
+            else:
+                cfg.save_credential(env_var, user_input.strip())
+                console.print("[green]API key saved securely to ~/.knowpiler/.env[/green]\n")
+        else:
+            console.print("[red]Backend setup skipped.[/red]\n")
+            raise typer.Exit(code=1)
+
     c = cfg.load_config()
     c.backend = backend
     cfg.save_config(c)
-    console.print(f"[green]Backend set to {backend}.[/green]")
+    console.print(f"[green]Backend successfully set to {backend}.[/green]")
 
 
 @app.command()

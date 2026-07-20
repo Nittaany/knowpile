@@ -1,22 +1,16 @@
 """
 Persisted configuration for knowpiler.
 
-Design call: Level-0 (normalize.sh) picked an LLM backend by silently
-checking env vars in a fixed priority order. Step 4 of the Level-2
-pipeline -- the semantic rewrite that resolves contradictions and marks
-[UNKNOWN] -- is the single most consequential LLM call in the whole
-system. Which model produced that rewrite is itself part of the
-traceability record. So: the backend is a config value, set explicitly
-via `knowpiler config set-backend`, recorded into each project's manifest
-when `rewrite` runs. Env vars still hold the actual credentials (never
-stored in config.toml).
+Design call: Level-0 (normalize.sh) picked an LLM backend by silently checking env vars in a fixed priority order. Step 4 of the Level-2 pipeline -- the semantic rewrite that resolves contradictions and marks [UNKNOWN] -- is the single most consequential LLM call in the whole system. Which model produced that rewrite is itself part of the traceability record. So: the backend is a config value, set explicitly via `knowpiler config set-backend`, recorded into each project's manifest when `rewrite` runs. Env vars still hold the actual credentials which are stored securely in a local .env file (never in config.toml).
 """
 from __future__ import annotations
 
 import os
+import stat
 from pathlib import Path
 from typing import Optional
 
+import dotenv
 import tomli_w
 from pydantic import BaseModel
 
@@ -27,6 +21,7 @@ except ModuleNotFoundError:  # Python 3.10
 
 KNOWPILER_HOME = Path(os.environ.get("KNOWPILER_HOME", Path.home() / ".knowpiler"))
 CONFIG_PATH = KNOWPILER_HOME / "config.toml"
+ENV_PATH = KNOWPILER_HOME / ".env"
 
 SUPPORTED_BACKENDS = ("claude", "gemini", "openai", "deepseek", "kimi", "ollama")
 
@@ -39,6 +34,9 @@ ENV_VAR_BY_BACKEND = {
     "ollama": "OLLAMA_BASE_URL",
 }
 
+# Auto-hydrate process memory with the secure .env file if it exists
+if ENV_PATH.exists():
+    dotenv.load_dotenv(ENV_PATH)
 
 class Config(BaseModel):
     backend: Optional[str] = None
@@ -72,3 +70,16 @@ def backend_ready(backend: str) -> bool:
     if backend == "ollama":
         return True  # OLLAMA_BASE_URL defaults to localhost if unset
     return bool(os.environ.get(env_var))
+
+def save_credential(env_var: str, value: str) -> None:
+    """Securely saves any credential to ~/.knowpiler/.env and updates current session."""
+    KNOWPILER_HOME.mkdir(parents=True, exist_ok=True)
+    
+    # Save the key to the .env file
+    dotenv.set_key(ENV_PATH, env_var, value)
+    
+    # Lock down file permissions: Read/Write for the owner ONLY (chmod 600)
+    ENV_PATH.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    
+    # Instantly inject it into the running process memory
+    os.environ[env_var] = value
