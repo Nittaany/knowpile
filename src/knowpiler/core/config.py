@@ -35,8 +35,10 @@ ENV_VAR_BY_BACKEND = {
 }
 
 # Auto-hydrate process memory with the secure .env file if it exists
-if ENV_PATH.exists():
-    dotenv.load_dotenv(ENV_PATH)
+def hydrate_env() -> None:
+    """Explicitly loads environment variables. Call once at CLI startup."""
+    if ENV_PATH.exists():
+        dotenv.load_dotenv(ENV_PATH)
 
 class Config(BaseModel):
     backend: Optional[str] = None
@@ -78,8 +80,25 @@ def save_credential(env_var: str, value: str) -> None:
     # Save the key to the .env file
     dotenv.set_key(ENV_PATH, env_var, value)
     
-    # Lock down file permissions: Read/Write for the owner ONLY (chmod 600)
-    ENV_PATH.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    # Lock down file permissions: Read/Write for owner ONLY on POSIX systems
+    if os.name != "nt":
+        ENV_PATH.chmod(stat.S_IRUSR | stat.S_IWUSR)
     
     # Instantly inject it into the running process memory
     os.environ[env_var] = value
+
+def get_vault_status() -> dict:
+    """
+    Reads the .env file directly from disk. 
+    Safe for tests and dry-runs because it never mutates os.environ.
+    """
+    if not ENV_PATH.exists():
+        return {}
+    return dotenv.dotenv_values(ENV_PATH)
+
+def unset_credential(env_var: str) -> None:
+    """Removes a credential from the .env vault and current session."""
+    if ENV_PATH.exists():
+        dotenv.unset_key(ENV_PATH, env_var)
+    if env_var in os.environ:
+        del os.environ[env_var]

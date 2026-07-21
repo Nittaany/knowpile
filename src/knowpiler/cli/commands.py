@@ -26,6 +26,10 @@ REPORT_TYPES = ["final_report", "architecture_report", "functional_report", "res
 DIR_VALIDATOR = PathValidator(is_dir=True, message="Path does not exist or is not a directory")
 FILE_VALIDATOR = PathValidator(is_file=True, message="Path does not exist or is not a file")
 
+@app.callback()
+def main_callback() -> None:
+    """knowpiler - Knowledge compilation engine"""
+    cfg.hydrate_env()
 
 @app.command()
 def doctor() -> None:
@@ -49,37 +53,44 @@ def config_show() -> None:
 
 
 @config_app.command("set-backend")
-def config_set_backend(backend: str = typer.Argument(..., help=f"one of {cfg.SUPPORTED_BACKENDS}")) -> None:
+def config_set_backend(
+    backend: str = typer.Argument(..., help=f"one of {cfg.SUPPORTED_BACKENDS}"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force update existing credentials and model")
+) -> None:
     if backend not in cfg.SUPPORTED_BACKENDS:
         console.print(f"[red]Unknown backend '{backend}'.[/red] Choose from: {cfg.SUPPORTED_BACKENDS}")
         raise typer.Exit(code=1)
     
-    # Billing Transparency Warning for Cloud Providers
-    if backend != "ollama":
-        console.print(
-            f"\n[cyan]◆ BILLING NOTICE[/cyan] [dim]Setting your backend to '{backend}' means you will be billed by the provider for API usage.\n"
-            "                 This includes semantic extraction, knowledge file rewriting, and final artifact generation.\n"
-            "                 Please ensure you have a valid API key and understand the costs.\n"
-        )
-        
-    # Local Model Hint for OpenAI compatible endpoints
+    # Smart UX Routing for Notices
     if backend == "openai":
         console.print(
-            "[cyan]◇ LOCAL MODEL[/cyan] [dim]If using a local OpenAI-compatible server (LM Studio, vLLM, etc.),\n"
-            "                 just paste your base URL (e.g., http://localhost:8080/v1) below.\n"
-            "                 We will auto-configure the rest.[/dim]\n"
+            "\n[cyan]◇ LOCAL SERVER (FREE)[/cyan] [dim]If using LM Studio/vLLM, paste your base URL (http://...) below.[/dim]\n"
+            "[cyan]◆ CLOUD API (PAID)[/cyan]    [dim]If using OpenAI's cloud API, pasting a key means you will be billed.[/dim]\n"
         )
+    elif backend != "ollama":
+        console.print(
+            f"\n[cyan]◆ BILLING NOTICE[/cyan]      [dim]Setting your backend to '{backend}' means you will be billed\n"
+            "                      by the provider for API usage. This includes semantic extraction,\n"
+            "                      knowledge file rewriting, and final artifact generation.[/dim]\n"
+        )
+
+    # 1. Load config early to manage state transitions
+    c = cfg.load_config()
     
-    # The interceptor: if they don't have the key set, securely ask for it now
-    if not cfg.backend_ready(backend) and backend != "ollama":
+    # 2. STATE PURGE: If switching backends, wipe out any old model configurations
+    if c.backend != backend:
+        c.model = None
+        
+    c.backend = backend
+    
+    # The interceptor: triggers if missing, OR if the user explicitly passes --force
+    if (not cfg.backend_ready(backend) or force) and backend != "ollama":
         env_var = cfg.ENV_VAR_BY_BACKEND[backend]
         
-        # Dynamically change the prompt text based on backend
         prompt_msg = f"Enter your {backend} API key (input is hidden):"
         if backend == "openai":
             prompt_msg = f"Enter your {backend} API key OR Local Base URL (input is hidden):"
             
-        # Masked password prompt using InquirerPy
         user_input = inquirer.secret(message=prompt_msg).execute()
         
         if user_input:
@@ -87,18 +98,60 @@ def config_set_backend(backend: str = typer.Argument(..., help=f"one of {cfg.SUP
             if backend == "openai" and user_input.startswith("http"):
                 cfg.save_credential("OPENAI_BASE_URL", user_input.strip())
                 cfg.save_credential("OPENAI_API_KEY", "sk-local-dummy-key")
-                console.print("[green]Local base URL saved securely! Dummy API key auto-generated.[/green]\n")
+                console.print("[green]Local base URL saved securely! Dummy API key auto-generated.[/green]")
+                
+                # Close the UX gap: Ask for the explicit local model name
+                local_model = inquirer.text(
+                    message="Enter the exact model name running on your server (e.g., 'llama-3-8b'):"
+                ).execute()
+                
+                c.model = local_model.strip() if local_model else "local-model"
+                cfg.save_config(c)
+                console.print(f"\n[green]Backend successfully set to {backend} (routing to: {c.model}).[/green]")
+                return  # Exit early to prevent standard saving below
             else:
+                # TRANSITION CLEANUP: If they pasted a real API key for OpenAI, we must destroy 
+                # any old Base URL and model data so it doesn't hijack the cloud request.
+                if backend == "openai":
+                    cfg.unset_credential("OPENAI_BASE_URL")
+                    c.model = None 
+
                 cfg.save_credential(env_var, user_input.strip())
                 console.print("[green]API key saved securely to ~/.knowpiler/.env[/green]\n")
         else:
-            console.print("[red]Backend setup skipped.[/red]\n")
+            console.print("[red]Backend setup aborted.[/red]\n")
             raise typer.Exit(code=1)
 
-    c = cfg.load_config()
-    c.backend = backend
+    # 3. Final save for standard paths
     cfg.save_config(c)
     console.print(f"[green]Backend successfully set to {backend}.[/green]")
+
+    
+@config_app.command("show")
+def config_show() -> None:
+    """Display current configuration and credential vault status."""
+    c = cfg.load_config()
+    console.print("\n[bold]⚙️  Current Configuration (config.toml)[/bold]")
+    console.print(f"  Active Backend : [cyan]{c.backend or 'Not set'}[/cyan]")
+    console.print(f"  Active Model   : [cyan]{c.model or 'Default'}[/cyan]")
+    
+    console.print("\n[bold]🔒 Vault Status (~/.knowpiler/.env)[/bold]")
+    
+    # Read truth directly from disk, ignoring potential stale process memory
+    vault = cfg.get_vault_status()
+    
+    for b in cfg.SUPPORTED_BACKENDS:
+        if b == "ollama": continue
+        env_var = cfg.ENV_VAR_BY_BACKEND[b]
+        is_set = bool(vault.get(env_var))
+        status = "[green]✓ Ready[/green]" if is_set else "[dim]✗ Missing[/dim]"
+        console.print(f"  {status} : {b} ({env_var})")
+    
+    # Special check for the OpenAI Local Base URL interceptor
+    local_url = vault.get("OPENAI_BASE_URL")
+    if local_url:
+        console.print(f"  [green]✓ Ready[/green] : openai local URL -> [cyan]{local_url}[/cyan]")
+    console.print()
 
 
 @app.command()

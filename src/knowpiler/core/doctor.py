@@ -57,22 +57,23 @@ def _check_pygount() -> CheckResult:
         )
     
 def _check_graphify_venv() -> CheckResult:
-    """this is a venv-local check, not a system PATH check. 
+    """venv-local check using cross-platform executable resolution.
 
-    Bypasses standard global PATH searching entirely. It looks directly
-    inside the active virtual environment execution directory to guarantee
-    we are running our local pinned version, not a leaking global binary.
+    Restricts shutil.which to the current Python execution folder
+    (bin/ on POSIX, Scripts/ on Windows) to guarantee venv isolation.
     """
     venv_bin_dir = Path(sys.executable).parent
-    graphify_bin = venv_bin_dir / "graphify"
+    
+    # shutil.which resolves .exe extensions on Windows and stays inside venv_bin_dir
+    graphify_bin = shutil.which("graphify", path=str(venv_bin_dir))
 
-    if not graphify_bin.exists():
+    if not graphify_bin:
         return CheckResult(
             "graphify (venv CLI)", False,
-            f"Executable missing from venv at {graphify_bin}. Fix: run `uv pip install -e .`"
+            f"Executable missing from venv at {venv_bin_dir}. Fix: run `uv pip install -e .`"
         )
     try:
-        subprocess.run([str(graphify_bin), "--version"], capture_output=True, timeout=5, check=False)
+        subprocess.run([graphify_bin, "--version"], capture_output=True, timeout=5, check=False)
         return CheckResult("graphify (venv CLI)", True, str(graphify_bin))
     except Exception as e:
         return CheckResult(
