@@ -79,12 +79,6 @@ config_app = typer.Typer(help="View or set persisted defaults.")
 app.add_typer(config_app, name="config")
 
 
-@config_app.command("show")
-def config_show() -> None:
-    c = cfg.load_config()
-    console.print(c.model_dump())
-
-
 @config_app.command("set-backend")
 def config_set_backend(
     backend: str = typer.Argument(..., help=f"one of {cfg.SUPPORTED_BACKENDS}"),
@@ -162,28 +156,36 @@ def config_set_backend(
     
 @config_app.command("show")
 def config_show() -> None:
-    """Display current configuration and credential vault status."""
+    """Display current configuration and credential status (vault + system env)."""
     c = cfg.load_config()
     console.print("\n[bold]⚙️  Current Configuration (config.toml)[/bold]")
     console.print(f"  Active Backend : [cyan]{c.backend or 'Not set'}[/cyan]")
     console.print(f"  Active Model   : [cyan]{c.model or 'Default'}[/cyan]")
-    
-    console.print("\n[bold]🔒 Vault Status (~/.knowpiler/.env)[/bold]")
-    
-    # Read truth directly from disk, ignoring potential stale process memory
-    vault = cfg.get_vault_status()
-    
-    for b in cfg.SUPPORTED_BACKENDS:
-        if b == "ollama": continue
-        env_var = cfg.ENV_VAR_BY_BACKEND[b]
-        is_set = bool(vault.get(env_var))
-        status = "[green]✓ Ready[/green]" if is_set else "[dim]✗ Missing[/dim]"
-        console.print(f"  {status} : {b} ({env_var})")
-    
-    # Special check for the OpenAI Local Base URL interceptor
-    local_url = vault.get("OPENAI_BASE_URL")
-    if local_url:
-        console.print(f"  [green]✓ Ready[/green] : openai local URL -> [cyan]{local_url}[/cyan]")
+
+    console.print("\n[bold]🔒 Credential Status[/bold]")
+
+    status = cfg.get_credential_status()
+    for backend, info in status.items():
+        source = info["source"]
+        if source == "vault":
+            color, label = "green", "✓ Ready (vault)"
+        elif source == "system":
+            color, label = "blue", "✓ Ready (system)"
+        else:
+            color, label = "dim", "✗ Missing"
+        # Pad the plain label first, then wrap in markup -- padding a
+        # string that already contains [color]...[/color] tags misaligns
+        # columns, since the tag characters count toward the padded width
+        # even though Rich strips them at render time.
+        console.print(f"  [{color}]{label:<18}[/{color}] : {backend} ({info['env_var']})")
+
+    # Special check for the OpenAI local-server base URL interceptor --
+    # same vault-vs-system distinction applies here too, not hardcoded.
+    local = cfg.get_local_base_url_status()
+    if local:
+        url, source = local
+        console.print(f"  [green]{'✓ Ready (' + source + ')':<18}[/green] : openai local URL -> [cyan]{url}[/cyan]")
+
     console.print()
 
 
@@ -198,10 +200,18 @@ def init(project: str = typer.Argument(..., help="Project name, e.g. 'Semantic W
     ).execute()
     src_dir = inquirer.filepath(
         message="Source folder graphify should scan:",
-        default=f"{root_dir.rstrip('/')}/src",
+        # Default is root_dir itself, not a hardcoded "/src" guess --
+        # confirmed wrong against real project trees (Laravel's app/,
+        # the LMS backend's controllers/) that have no src/ folder at all.
+        default=root_dir,
         only_directories=True,
         validate=DIR_VALIDATOR,
     ).execute()
+    # Single prompt for now -- wrapped into the list the schema now
+    # expects. The full multi-root collection loop (add another source
+    # root? -> yes/no, repeat) is a separate, larger UX piece, not built
+    # in this pass.
+    src_dirs = [src_dir]
 
     readme_path = None
     if inquirer.confirm(message="Do you have a README?", default=False).execute():
@@ -244,7 +254,7 @@ def init(project: str = typer.Argument(..., help="Project name, e.g. 'Semantic W
     manifest = create_manifest(
         project=project,
         root_dir=root_dir,
-        src_dir=src_dir,
+        src_dirs=src_dirs,
         storage_root=c.storage_root,
         readme_path=readme_path,
         reports=reports,

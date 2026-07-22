@@ -28,7 +28,26 @@ ReportType = Literal[
 
 class CodePaths(BaseModel):
     root_dir: str
-    src_dir: str
+    # List, not a single string: real projects split source across multiple
+    # independent roots (a frontend + backend in one parent folder, or
+    # app/ + routes/ in a Laravel-style layout) that should be scanned and
+    # graphed separately, not blended into one directory walk. Confirmed
+    # against real project trees during Level 2.2 design, not theoretical.
+    src_dirs: List[str]
+
+    @field_validator("root_dir")
+    @classmethod
+    def _clean_root(cls, v: str) -> str:
+        # CodePaths was the one path-bearing model in this file with no
+        # cleaning at all -- every other field (readme/reports/research/
+        # presentations/notes/arch_diagram) already had this. Closing that
+        # gap here since this class is already being touched for src_dirs.
+        return clean_path(v)
+
+    @field_validator("src_dirs")
+    @classmethod
+    def _clean_srcs(cls, v: List[str]) -> List[str]:
+        return [clean_path(p) for p in v]
 
 
 class ReadmeInfo(BaseModel):
@@ -84,6 +103,42 @@ class ArchDiagramInfo(BaseModel):
         return self
 
 
+class ConversionLogEntry(BaseModel):
+    """One markitdown conversion attempt (Phase 2). Mirrors
+    core.convert.ConversionResult's ok/error shape -- the manifest is where
+    that transient per-call result becomes a persisted traceability record.
+    Deliberately holds the path and outcome, never the converted text
+    itself: the manifest tracks *what happened to evidence*, not a copy of
+    the evidence's content.
+    """
+    path: str
+    ok: bool
+    error: Optional[str] = None
+    converted_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    @field_validator("path")
+    @classmethod
+    def _clean_path(cls, v: str) -> str:
+        return clean_path(v)
+
+
+class GraphifyRunLogEntry(BaseModel):
+    """One graphify subprocess invocation (Phase 3), one entry per src_dir
+    -- graphify runs once per source root, never once for the whole
+    project, so its outcomes are logged the same way.
+    """
+    src_dir: str
+    output_path: Optional[str] = None
+    ok: bool
+    error: Optional[str] = None
+    ran_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    @field_validator("src_dir", "output_path")
+    @classmethod
+    def _clean_path(cls, v: Optional[str]) -> Optional[str]:
+        return clean_path(v) if v else v
+
+
 class Manifest(BaseModel):
     schema_version: int = SCHEMA_VERSION
     project: str
@@ -103,6 +158,13 @@ class Manifest(BaseModel):
     backend_used: Optional[str] = None
     model_used: Optional[str] = None
 
+    # Filled in once `normalize` actually runs (Phase 2/3) -- empty until
+    # then. Kept on the manifest rather than a separate sidecar file for
+    # the same reason backend_used/model_used live here: one traceability
+    # record per project, not several files that can drift out of sync.
+    conversion_log: List[ConversionLogEntry] = []
+    graphify_log: List[GraphifyRunLogEntry] = []
+
     def save(self, path: Optional[Path] = None) -> Path:
         target = path or (Path(self.staging_dir) / "manifest.json")
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -117,7 +179,7 @@ class Manifest(BaseModel):
 def create_manifest(
     project: str,
     root_dir: str,
-    src_dir: str,
+    src_dirs: List[str],
     storage_root: str,
     readme_path: Optional[str] = None,
     reports: Optional[List[dict]] = None,
@@ -138,7 +200,7 @@ def create_manifest(
     manifest = Manifest(
         project=project,
         staging_dir=staging_dir,
-        code=CodePaths(root_dir=root_dir, src_dir=src_dir),
+        code=CodePaths(root_dir=root_dir, src_dirs=src_dirs),
         readme=ReadmeInfo(status="collected", path=readme_path) if readme_path else ReadmeInfo(),
         reports=[TypedFile(**r) for r in (reports or [])],
         research=[PlainFile(path=p) for p in (research or [])],

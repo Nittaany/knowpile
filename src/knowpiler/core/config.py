@@ -105,6 +105,57 @@ def get_vault_status() -> dict:
         return {}
     return dotenv.dotenv_values(ENV_PATH)
 
+
+def get_credential_status() -> dict:
+    """Per-backend view of whether a credential is available right now,
+    and where it's actually coming from.
+
+    `get_vault_status()` alone isn't enough for an honest status display:
+    it only sees ~/.knowpiler/.env, so a credential the user's own shell
+    profile exports independently of knowpiler (confirmed real case:
+    `export GEMINI_API_KEY=...` in .zshrc) reported as "Missing" even
+    though `backend_ready()` -- which checks os.environ -- already treats
+    it as ready and silently skips prompting for it during `set-backend`.
+    This reconciles the two so `config show` reflects the same truth
+    `set-backend` already acts on.
+
+    Three states per backend:
+      - "vault":   persisted in ~/.knowpiler/.env -- portable, survives a
+                   fresh shell/session or a different machine.
+      - "system":  only in os.environ right now -- most likely the user's
+                   own shell profile, not anything knowpiler persisted;
+                   won't be there in a different terminal/session unless
+                   that profile is present there too.
+      - "missing": neither.
+    """
+    vault = get_vault_status()
+    status: dict = {}
+    for backend, env_var in ENV_VAR_BY_BACKEND.items():
+        if backend == "ollama":
+            continue
+        if vault.get(env_var):
+            source = "vault"
+        elif os.environ.get(env_var):
+            source = "system"
+        else:
+            source = "missing"
+        status[backend] = {"env_var": env_var, "source": source}
+    return status
+
+
+def get_local_base_url_status() -> Optional[tuple]:
+    """Where OPENAI_BASE_URL is coming from right now, if anywhere -- same
+    vault-vs-system distinction as get_credential_status(), split out
+    separately since it isn't tied to one of the standard per-backend
+    credential env vars.
+    """
+    vault = get_vault_status()
+    if vault.get("OPENAI_BASE_URL"):
+        return vault["OPENAI_BASE_URL"], "vault"
+    if os.environ.get("OPENAI_BASE_URL"):
+        return os.environ["OPENAI_BASE_URL"], "system"
+    return None
+
 def unset_credential(env_var: str) -> None:
     """Removes a credential from the .env vault and current session."""
     if ENV_PATH.exists():
