@@ -23,6 +23,15 @@ KNOWPILER_HOME = Path(os.environ.get("KNOWPILER_HOME", Path.home() / ".knowpiler
 CONFIG_PATH = KNOWPILER_HOME / "config.toml"
 ENV_PATH = KNOWPILER_HOME / ".env"
 
+# Project data (staging output, eventually the Layer 1+2 knowledge corpus)
+# lives in a *visible* folder, deliberately separate from KNOWPILER_HOME.
+# KNOWPILER_HOME starts with a dot -- hidden by default in Finder/Explorer,
+# which is fine for config.toml/.env (credential-adjacent, shouldn't be
+# casually browsed) but actively hostile for evidence a non-technical user
+# needs to find later. Confirmed as a real problem via live `init` testing
+# in Level 2.2, not a theoretical one.
+KNOWPILER_PROJECTS_HOME = Path(os.environ.get("KNOWPILER_PROJECTS_HOME", Path.home() / "knowpiler-projects"))
+
 SUPPORTED_BACKENDS = ("claude", "gemini", "openai", "deepseek", "kimi", "ollama")
 
 ENV_VAR_BY_BACKEND = {
@@ -43,9 +52,9 @@ def hydrate_env() -> None:
 class Config(BaseModel):
     backend: Optional[str] = None
     model: Optional[str] = None
-    storage_root: str = str(KNOWPILER_HOME / "projects")
+    storage_root: str = str(KNOWPILER_PROJECTS_HOME)
     # Unified Layer 1 + Layer 2 corpus -- this is what Level 3/4 will read from.
-    knowledge_root: str = str(KNOWPILER_HOME / "knowledge")
+    knowledge_root: str = str(KNOWPILER_PROJECTS_HOME / "_knowledge")
 
 
 def load_config() -> Config:

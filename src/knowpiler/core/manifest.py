@@ -16,7 +16,7 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from knowpiler.core.utils import slugify, strip_shell_quotes
+from knowpiler.core.utils import clean_path, slugify
 
 SCHEMA_VERSION = 1
 
@@ -38,7 +38,7 @@ class ReadmeInfo(BaseModel):
     @field_validator("path")
     @classmethod
     def _clean_path(cls, v: Optional[str]) -> Optional[str]:
-        return strip_shell_quotes(v) if v else v
+        return clean_path(v) if v else v
 
     @model_validator(mode="after")
     def _status_matches_path(self) -> "ReadmeInfo":
@@ -55,7 +55,7 @@ class TypedFile(BaseModel):
     @field_validator("path")
     @classmethod
     def _clean_path(cls, v: str) -> str:
-        return strip_shell_quotes(v)
+        return clean_path(v)
 
 
 class PlainFile(BaseModel):
@@ -64,7 +64,7 @@ class PlainFile(BaseModel):
     @field_validator("path")
     @classmethod
     def _clean_path(cls, v: str) -> str:
-        return strip_shell_quotes(v)
+        return clean_path(v)
 
 
 class ArchDiagramInfo(BaseModel):
@@ -76,7 +76,7 @@ class ArchDiagramInfo(BaseModel):
     def _clean_path(cls, v: Optional[str]) -> Optional[str]:
         if v is None or v == "null":
             return None
-        return strip_shell_quotes(v)
+        return clean_path(v)
 
     @model_validator(mode="after")
     def _status_matches_path(self) -> "ArchDiagramInfo":

@@ -9,22 +9,55 @@ values from an HTTP request body and call the exact same core functions.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 from InquirerPy import inquirer
-from InquirerPy.validator import PathValidator
+from prompt_toolkit.document import Document
+from prompt_toolkit.validation import ValidationError, Validator
 from rich.console import Console
 
 from knowpiler.core import config as cfg
 from knowpiler.core.doctor import print_report, run_all
 from knowpiler.core.manifest import create_manifest
+from knowpiler.core.utils import clean_path
 
 app = typer.Typer(help="knowpiler -- knowledge compiler for engineers.")
 console = Console()
 
 REPORT_TYPES = ["final_report", "architecture_report", "functional_report", "research_report", "synopsis", "other"]
 
-DIR_VALIDATOR = PathValidator(is_dir=True, message="Path does not exist or is not a directory")
-FILE_VALIDATOR = PathValidator(is_file=True, message="Path does not exist or is not a file")
+
+class CleanPathValidator(Validator):
+    """Validates a path after normalizing it via clean_path() first.
+
+    InquirerPy's own PathValidator checks the raw buffer text -- so a path
+    dragged from Finder/Explorer (backslash-escaped) or copied via "Copy
+    as Pathname" (quote-wrapped) gets rejected and reprompted forever,
+    since the literal escaped/quoted string never exists on disk. This
+    cleans first, then checks -- confirmed fix against both real-world
+    patterns hit during Level 2.2 testing.
+    """
+
+    def __init__(self, is_file: bool = False, is_dir: bool = False, message: str = "Path does not exist") -> None:
+        self._is_file = is_file
+        self._is_dir = is_dir
+        self._message = message
+
+    def validate(self, document: Document) -> None:
+        raw = document.text
+        if not raw:
+            raise ValidationError(message=self._message, cursor_position=len(raw))
+        candidate = Path(clean_path(raw)).expanduser()
+
+        if self._is_dir and not candidate.is_dir():
+            raise ValidationError(message=self._message, cursor_position=len(raw))
+        if self._is_file and not candidate.is_file():
+            raise ValidationError(message=self._message, cursor_position=len(raw))
+
+
+DIR_VALIDATOR = CleanPathValidator(is_dir=True, message="Path does not exist or is not a directory")
+FILE_VALIDATOR = CleanPathValidator(is_file=True, message="Path does not exist or is not a file")
 
 @app.callback()
 def main_callback() -> None:
